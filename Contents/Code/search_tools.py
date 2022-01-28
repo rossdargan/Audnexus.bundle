@@ -8,7 +8,7 @@ import urllib
 log = Logging()
 
 asin_regex = '[0-9A-Z]{10}'
-
+no_colon_regex ='([*.]):'
 
 class AlbumSearchTool:
     SEARCH_URL = 'https://api.audible.com/1.0/catalog/products'
@@ -106,6 +106,26 @@ class AlbumSearchTool:
                 "language",
                 "narrators",
                 "release_date",
+                "title",
+                "subtitle"
+            }:
+                search_results.append(
+                    {
+                        'asin': item['asin'],
+                        'author': item['authors'],
+                        'date': item['release_date'],
+                        'language': item['language'],
+                        'narrator': item['narrators'],
+                        'title': item['title'],
+                        'subtitle': item['subtitle']
+                    }
+                )
+            elif item.viewkeys() >= {
+                "asin",
+                "authors",
+                "language",
+                "narrators",
+                "release_date",
                 "title"
             }:
                 search_results.append(
@@ -116,6 +136,7 @@ class AlbumSearchTool:
                         'language': item['language'],
                         'narrator': item['narrators'],
                         'title': item['title'],
+                        'subtitle':''
                     }
                 )
         return search_results
@@ -376,6 +397,7 @@ class ScoreTool:
     def reduce_string(self, string):
         normalized = string \
             .lower() \
+            .replace(' (unabridged)','') \
             .replace('-', '') \
             .replace(' ', '') \
             .replace('.', '') \
@@ -402,6 +424,8 @@ class ScoreTool:
         self.language = self.result_dict['language'].title()
         self.narrator = self.result_dict['narrator'][0]['name']
         self.title = self.result_dict['title']
+
+        self.subtitle = self.result_dict['subtitle']
         return self.score_result()
 
     def score_result(self):
@@ -411,8 +435,15 @@ class ScoreTool:
         # Album name score
         if self.title:
             title_score = self.score_album(self.title)
-            if title_score:
+            if title_score and self.subtitle!='':
+                title_subtitle_score = self.score_album_subtitle(self.title, self.subtitle)
+                if title_score<title_subtitle_score:                    
+                    all_scores.append(title_score)
+                else:
+                    all_scores.append(title_subtitle_score)
+            else:
                 all_scores.append(title_score)
+
         # Author name score
         if self.authors_concat:
             author_score = self.score_author(self.authors_concat)
@@ -480,6 +511,26 @@ class ScoreTool:
             self.reduce_string(scorebase2)
         ) * 2
         log.debug("Score deduction from album: " + str(album_score))
+        return album_score
+
+    def score_album_subtitle(self, title, subtitle):
+        """
+            Compare the input album similarity to the search result album.
+            Score is calculated with LevenshteinDistance
+        """
+        scorebase1 = self.helper.media.album
+        if not scorebase1:
+            log.error('No album title found in file metadata')
+            return 50
+        scorebase2 = (title + ': ' + subtitle).encode('utf-8')
+        log.error( self.reduce_string(scorebase1))
+        
+        log.error( self.reduce_string(scorebase2))
+        album_score = self.calculate_score(
+            self.reduce_string(scorebase1),
+            self.reduce_string(scorebase2)
+        ) * 2
+        log.debug("Score deduction from album + subtitle: " + str(album_score))
         return album_score
 
     def score_author(self, author):
